@@ -1,0 +1,61 @@
+# SIH26055 RF Simulation Environment Default Configuration
+# Note: These are simulation parameters for evaluating scheduling algorithms,
+# and do not represent real DRDO system specifications.
+
+num_bands: 20
+simulation_duration: 10000
+seed: 42
+
+receiver:
+  pd: 0.90
+  pfa: 0.02
+  allowed_dwell_times: [1, 2, 3, 5]
+  bandwidth_bands: 1
+
+emitters:
+  # Scenario A: Periodic Pulse Emitter on Band 5
+  - emitter_id: "E_Periodic_B5"
+    emitter_type: "PERIODIC"
+    frequency_band: 5
+    period: 20
+    active_duration: 3
+    start_time: 0
+    end_time: null
+    offset: 0
+
+  # Scenario B1: Predictable Frequency-Agile Emitter
+  - emitter_id: "E_Agile_Predictable"
+    emitter_type: "AGILE_PREDICTABLE"
+    band_sequence: [3, 8, 5, 11, 4]
+    hop_period: 15
+    start_time: 0
+    end_time: null
+
+  # Scenario B2: Random Frequency-Agile Emitter
+  - emitter_id: "E_Agile_Random"
+    emitter_type: "AGILE_RANDOM"
+    allowed_bands: [12, 14, 16, 18]
+    hop_period: 25
+    start_time: 0
+    end_time: null
+    emitter_seed: 101
+
+  # Scenario C: Intermittent / Spatial Scanning Emitter on Band 7
+  - emitter_id: "E_Intermittent_B7"
+    emitter_type: "INTERMITTENT"
+    frequency_band: 7
+    scan_period: 50
+    observable_duration: 5
+    scan_offset: 10
+    start_time: 0
+    end_time: null
+
+  # Scenario E: Dynamic / Newly Appearing Emitter on Band 17 at t = 5000
+  - emitter_id: "E_Dynamic_B17"
+    emitter_type: "PERIODIC"
+    frequency_band: 17
+    period: 30
+    active_duration: 4
+    start_time: 5000
+    end_time: null
+    offset: 5
