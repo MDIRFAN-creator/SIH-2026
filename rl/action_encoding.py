@@ -18,7 +18,9 @@ Action Mapping Convention:
 """
 
 from typing import List, Optional, Sequence, Tuple
+import numpy as np
 from environment.types import Action
+
 
 
 class ActionEncoder:
@@ -102,3 +104,21 @@ class ActionEncoder:
         """
         band, dwell = self.decode(action_id)
         return Action(frequency_band=band, dwell_time=dwell)
+
+    def get_mask_excluding_band(self, exclude_band: Optional[int]) -> np.ndarray:
+        """
+        Generate a boolean action mask excluding actions for a given frequency band.
+
+        Args:
+            exclude_band: Frequency band index to forbid (or None to allow all).
+
+        Returns:
+            np.ndarray: Boolean array of shape (num_actions,) where True = valid, False = masked.
+        """
+        mask = np.ones(self.num_actions, dtype=bool)
+        if exclude_band is not None and 0 <= exclude_band < self.num_bands:
+            start_idx = exclude_band * self.num_dwells
+            end_idx = start_idx + self.num_dwells
+            mask[start_idx:end_idx] = False
+        return mask
+

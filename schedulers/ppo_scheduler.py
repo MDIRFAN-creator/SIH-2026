@@ -31,6 +31,7 @@ class PPOScheduler(BaseScheduler):
         model_path: Optional[str] = None,
         num_bands: int = 20,
         allowed_dwells: Optional[List[int]] = None,
+        max_consecutive_scans: int = 3,
         deterministic: bool = True,
         scheduler_name: str = "PPOAdaptiveScheduler",
     ) -> None:
@@ -42,12 +43,14 @@ class PPOScheduler(BaseScheduler):
             model_path: Optional file path to load trained PPO weights from.
             num_bands: Total frequency bands (default: 20).
             allowed_dwells: Allowed dwell choices (default: [1, 2, 3]).
+            max_consecutive_scans: Maximum consecutive scans allowed on any single frequency band (default: 3).
             deterministic: If True, uses argmax action selection at inference time.
             scheduler_name: Display name.
         """
         super().__init__(scheduler_name=scheduler_name)
         self.num_bands = num_bands
         self.allowed_dwells = allowed_dwells if allowed_dwells is not None else [1, 2, 3]
+        self.max_consecutive_scans_limit = max_consecutive_scans
         self.deterministic = deterministic
 
         self.action_encoder = ActionEncoder(
@@ -104,13 +107,27 @@ class PPOScheduler(BaseScheduler):
         # 2. Extract normalized state representation
         state = self.state_extractor.extract_state(observation)
 
-        # 3. Policy inference
-        action_id, _, _ = self.agent.select_action(state, deterministic=self.deterministic)
+        # 3. Compute observation-derived action mask for anti-camping
+        if (
+            self.max_consecutive_scans_limit > 0
+            and self._current_run_length >= self.max_consecutive_scans_limit
+            and self._last_selected_band is not None
+        ):
+            action_mask = self.action_encoder.get_mask_excluding_band(self._last_selected_band)
+        else:
+            action_mask = None
 
-        # 4. Decode to discrete band and dwell
+        # 4. Policy inference with optional action mask
+        action_id, _, _ = self.agent.select_action(
+            state,
+            action_mask=action_mask,
+            deterministic=self.deterministic,
+        )
+
+        # 5. Decode to discrete band and dwell
         band, dwell = self.action_encoder.decode(action_id)
 
-        # 5. Telemetry updates
+        # 6. Telemetry updates
         self.total_decisions += 1
         self.band_selection_counts[band] += 1
 
@@ -123,6 +140,7 @@ class PPOScheduler(BaseScheduler):
 
         self._last_selected_band = band
         return Action(frequency_band=band, dwell_time=dwell)
+
 
     def update(
         self,

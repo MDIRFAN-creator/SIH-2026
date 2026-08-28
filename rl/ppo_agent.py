@@ -68,18 +68,28 @@ class ActorCriticNetwork(nn.Module):
         # Value (Critic) Head
         self.critic = layer_init(nn.Linear(hidden_dim, 1), std=1.0)
 
-    def forward(self, state: torch.Tensor) -> Tuple[Categorical, torch.Tensor]:
+    def forward(
+        self,
+        state: torch.Tensor,
+        action_mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[Categorical, torch.Tensor]:
         """
-        Compute action distribution and state value.
+        Compute action distribution and state value, with optional action masking.
 
         Args:
             state: Float tensor of shape (batch_size, state_dim) or (state_dim,).
+            action_mask: Optional boolean tensor of shape (batch_size, action_dim) or (action_dim,).
+                         True indicates valid actions; False indicates masked/forbidden actions.
 
         Returns:
             Tuple[Categorical, torch.Tensor]: (Action distribution, State values).
         """
         features = self.trunk(state)
         logits = self.actor(features)
+        if action_mask is not None:
+            mask = action_mask.to(logits.device)
+            # Replace masked logits with a large negative value
+            logits = torch.where(mask, logits, torch.tensor(-1e9, dtype=logits.dtype, device=logits.device))
         value = self.critic(features).squeeze(-1)
         dist = Categorical(logits=logits)
         return dist, value
@@ -93,6 +103,7 @@ class ActorCriticNetwork(nn.Module):
         self,
         states: torch.Tensor,
         actions: torch.Tensor,
+        action_masks: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Evaluate log-probabilities, entropy, and values for given state-action pairs.
@@ -100,14 +111,16 @@ class ActorCriticNetwork(nn.Module):
         Args:
             states: Tensor of shape (batch_size, state_dim).
             actions: Long tensor of shape (batch_size,).
+            action_masks: Optional boolean tensor of shape (batch_size, action_dim).
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor, torch.Tensor]: (log_probs, entropy, values).
         """
-        dist, values = self.forward(states)
+        dist, values = self.forward(states, action_mask=action_masks)
         log_probs = dist.log_prob(actions)
         entropy = dist.entropy()
         return log_probs, entropy, values
+
 
 
 @dataclass
@@ -171,13 +184,15 @@ class PPOAgent:
     def select_action(
         self,
         state: np.ndarray,
+        action_mask: Optional[np.ndarray] = None,
         deterministic: bool = False,
     ) -> Tuple[int, float, float]:
         """
-        Select an action given the current state.
+        Select an action given the current state and optional action mask.
 
         Args:
             state: 1D numpy array of shape (state_dim,).
+            action_mask: Optional boolean numpy array of shape (action_dim,) where True = valid, False = masked.
             deterministic: If True, selects argmax action without sampling.
 
         Returns:
@@ -186,7 +201,8 @@ class PPOAgent:
         self.network.eval()
         with torch.no_grad():
             state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
-            dist, value = self.network(state_tensor)
+            mask_tensor = torch.as_tensor(action_mask, dtype=torch.bool, device=self.device).unsqueeze(0) if action_mask is not None else None
+            dist, value = self.network(state_tensor, action_mask=mask_tensor)
 
             if deterministic:
                 action = torch.argmax(dist.logits, dim=-1)
@@ -242,6 +258,7 @@ class PPOAgent:
         old_log_probs: np.ndarray,
         returns: np.ndarray,
         advantages: np.ndarray,
+        action_masks: Optional[np.ndarray] = None,
     ) -> Dict[str, float]:
         """
         Perform PPO mini-batch policy and value updates.
@@ -252,6 +269,7 @@ class PPOAgent:
             old_log_probs: Array of shape (N,).
             returns: Array of shape (N,).
             advantages: Array of shape (N,).
+            action_masks: Optional boolean array of shape (N, action_dim).
 
         Returns:
             Dict[str, float]: Training loss telemetry.
@@ -263,6 +281,7 @@ class PPOAgent:
         old_log_probs_t = torch.as_tensor(old_log_probs, dtype=torch.float32, device=self.device)
         returns_t = torch.as_tensor(returns, dtype=torch.float32, device=self.device)
         advantages_t = torch.as_tensor(advantages, dtype=torch.float32, device=self.device)
+        action_masks_t = torch.as_tensor(action_masks, dtype=torch.bool, device=self.device) if action_masks is not None else None
 
         # Normalize advantages
         adv_mean = advantages_t.mean()
@@ -290,8 +309,10 @@ class PPOAgent:
                 b_old_log_probs = old_log_probs_t[batch_idx]
                 b_returns = returns_t[batch_idx]
                 b_advantages = norm_advantages_t[batch_idx]
+                b_masks = action_masks_t[batch_idx] if action_masks_t is not None else None
 
-                new_log_probs, entropy, new_values = self.network.evaluate_actions(b_states, b_actions)
+                new_log_probs, entropy, new_values = self.network.evaluate_actions(b_states, b_actions, action_masks=b_masks)
+
 
                 # Policy Loss with PPO Clipping
                 log_ratio = new_log_probs - b_old_log_probs

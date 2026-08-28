@@ -7,6 +7,7 @@ from schedulers.open_loop import OpenLoopScheduler
 from schedulers.xgboost_scheduler import XGBoostScheduler
 from schedulers.linucb_scheduler import LinUCBScheduler
 from schedulers.ppo_scheduler import PPOScheduler
+from schedulers.hybrid_scheduler import HybridAdaptiveScheduler
 
 __all__ = [
     "BaseScheduler",
@@ -14,5 +15,7 @@ __all__ = [
     "XGBoostScheduler",
     "LinUCBScheduler",
     "PPOScheduler",
+    "HybridAdaptiveScheduler",
 ]
+
 

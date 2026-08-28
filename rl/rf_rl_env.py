@@ -55,6 +55,7 @@ class RFRLGymEnv(gym.Env):
         env_config: Optional[EnvironmentConfig] = None,
         reward_config: Optional[RLRewardConfig] = None,
         dwell_values: Optional[List[int]] = None,
+        max_consecutive_scans: int = 0,
         seed: Optional[int] = None,
     ) -> None:
         """
@@ -64,12 +65,14 @@ class RFRLGymEnv(gym.Env):
             env_config: Optional RF EnvironmentConfig.
             reward_config: Optional RLRewardConfig.
             dwell_values: Allowed dwell durations (default: [1, 2, 3]).
+            max_consecutive_scans: Max consecutive scans before masking (0 = unconstrained).
             seed: Initial random seed.
         """
         super().__init__()
         self.rf_config = env_config if env_config is not None else EnvironmentConfig()
         self.reward_calculator = RLRewardCalculator(config=reward_config)
         self.dwell_values = dwell_values if dwell_values is not None else [1, 2, 3]
+        self.max_consecutive_scans = max_consecutive_scans
 
         self.num_bands = self.rf_config.num_bands
         self.action_encoder = ActionEncoder(
@@ -97,8 +100,19 @@ class RFRLGymEnv(gym.Env):
         self.rf_env = RFEnvironment(config=self.rf_config)
         self.last_observation: Optional[Observation] = None
         self.consecutive_scans_tracker: int = 0
+        self.consecutive_hits_tracker: int = 0
         self.last_scanned_band: Optional[int] = None
 
+    def get_action_mask(self) -> np.ndarray:
+        """
+        Compute valid action mask based on observation-derived anti-camping constraints.
+
+        Returns:
+            np.ndarray: Boolean array of shape (num_actions,) where True = valid, False = masked.
+        """
+        if self.max_consecutive_scans > 0 and self.consecutive_scans_tracker >= self.max_consecutive_scans:
+            return self.action_encoder.get_mask_excluding_band(self.last_scanned_band)
+        return np.ones(self.action_encoder.num_actions, dtype=bool)
 
     def reset(
         self,
@@ -120,12 +134,14 @@ class RFRLGymEnv(gym.Env):
         self.state_extractor.reset()
         self.last_observation = initial_obs
         self.consecutive_scans_tracker = 0
+        self.consecutive_hits_tracker = 0
         self.last_scanned_band = None
 
         state = self.state_extractor.extract_state(initial_obs)
         info: Dict[str, Any] = {
             "current_time": self.rf_env.current_time,
             "seed": seed if seed is not None else self.rf_env.seed,
+            "action_mask": self.get_action_mask(),
         }
         return state, info
 
@@ -146,6 +162,10 @@ class RFRLGymEnv(gym.Env):
         band, dwell = self.action_encoder.decode(action_id)
         action = Action(frequency_band=band, dwell_time=dwell)
 
+        # Observation-derived staleness prior to executing the action
+        last_t = self.state_extractor.last_scanned_time[band]
+        time_since_last_scan = float(self.rf_env.current_time - last_t) if last_t >= 0 else -1.0
+
         # Track consecutive scans on the same band
         if band == self.last_scanned_band:
             self.consecutive_scans_tracker += 1
@@ -157,11 +177,20 @@ class RFRLGymEnv(gym.Env):
         obs, _, terminated, raw_info = self.rf_env.step(action)
         self.last_observation = obs
 
+        # Track consecutive hits
+        from environment.types import DetectionResult
+        if obs.result == DetectionResult.HIT:
+            self.consecutive_hits_tracker += 1
+        else:
+            self.consecutive_hits_tracker = 0
+
         # Calculate observation-derived reward
         reward = self.reward_calculator.compute_reward(
             observation=obs,
             dwell_time=dwell,
             consecutive_scans=self.consecutive_scans_tracker,
+            time_since_last_scan=time_since_last_scan,
+            consecutive_hits=self.consecutive_hits_tracker,
         )
 
         # Update state extractor
@@ -175,6 +204,8 @@ class RFRLGymEnv(gym.Env):
             "result": obs.result.name if obs.result else "NONE",
             "current_time": self.rf_env.current_time,
             "terminated": terminated,
+            "action_mask": self.get_action_mask(),
         }
 
         return next_state, reward, terminated, truncated, info
+

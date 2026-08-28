@@ -455,14 +455,121 @@ Observation Memory (Legitimate Receiver Data)
 
 ---
 
-## 12. Reproduction & Running Experiments
+## 12. Pre-Phase 6A: PPO Hardening Pass (Anti-Camping & Multi-Threat Exploration)
 
-### Run All 87 Unit & Integration Tests
+Pre-Phase 6A resolves the exploitation collapse failure mode of the original PPO agent by introducing:
+1. **Observation-Derived Reward with Diminishing Returns:** $R_{\text{hit}} = \text{base} \cdot \max(0.40, 1.0 - 0.15 \cdot (N_{\text{consec\_hits}} - 1))$ plus an observation-derived staleness bonus for visiting neglected bands.
+2. **Causal Action Masking:** Automatically hard-masks actions for any frequency band scanned continuously for $\ge 3$ slots, enforcing a strict anti-camping invariant ($P(\text{camp}) \equiv 0$).
+3. **Randomized Multi-Threat Training:** Trains over procedural scenarios with dynamic radar appearances, agile frequency hops, and spatial antenna rotations.
+
+### Five-Way Head-to-Head Benchmark Comparison ($N = 10$ Unseen Test Seeds `0..9`)
+
+| Metric | Open-Loop Baseline | XGBoost Adaptive | Hardened LinUCB | Original PPO | Hardened PPO (Pre-Phase 6A) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Interception Rate** | $46.13\% \pm 0.68\%$ | **$47.28\% \pm 1.09\%$** | $29.75\% \pm 0.51\%$ | $6.93\% \pm 0.00\%$ | **$37.87\% \pm 0.04\%$** |
+| **Unique Opportunities Intercepted** | $892.2 \pm 13.2$ | **$914.4 \pm 21.1$** | $575.4 \pm 9.8$ | $134.0 \pm 0.0$ | **$732.4 \pm 0.8$** |
+| **Average Intercept Delay** | $8.25 \pm 0.96$ slots | $2.74 \pm 0.31$ slots | $7.63 \pm 0.25$ slots | $0.10 \pm 0.02$ slots | **$0.41 \pm 0.18$ slots** |
+| **PRD Scenario TTFD** | $3.00 \pm 0.00$ slots | **$0.30 \pm 0.48$ slots** | $4.00 \pm 2.54$ slots | $0.30 \pm 0.48$ slots | **$0.30 \pm 0.48$ slots** |
+| **Receiver Empirical $P_d$** | $0.90 \pm 0.01$ | $0.90 \pm 0.00$ | $0.90 \pm 0.01$ | $0.90 \pm 0.01$ | $0.90 \pm 0.00$ |
+| **Receiver Empirical $P_{fa}$** | $0.02 \pm 0.00$ | $0.02 \pm 0.00$ | $0.02 \pm 0.00$ | $0.02 \pm 0.00$ | $0.02 \pm 0.00$ |
+| **Dwell Efficiency** | $10.73\% \pm 0.74\%$ | **$68.26\% \pm 1.37\%$** | $23.90\% \pm 1.15\%$ | $20.10\% \pm 0.00\%$ | **$33.26\% \pm 0.48\%$** |
+| **Total True Positive Detections** | $964.9 \pm 68.7$ | **$6,146.7 \pm 122.7$** | $2,158.0 \pm 104.0$ | $1,807.9 \pm 14.9$ | **$2,992.5 \pm 42.4$** |
+| **TP Detections / Intercepted Opp** | $1.08 \pm 0.07$ | $6.72 \pm 0.07$ | $3.75 \pm 0.22$ | $13.49 \pm 0.11$ | **$4.09 \pm 0.06$** |
+| **Unique Frequency Bands Visited** | **$20.0 / 20$** | $8.1 / 20$ | **$20.0 / 20$** | $1.0 / 20$ | **$2.0 / 20$** |
+| **Max Consecutive Scans** | **$1.0 \pm 0.0$** | **$3.0 \pm 0.0$** | **$3.0 \pm 0.0$** | $5000.0 \pm 0.0$ | **$3.0 \pm 0.0$** |
+| **Band-Selection Shannon Entropy** | **$3.00 \pm 0.00$** | $1.64 \pm 0.08$ | **$2.92 \pm 0.01$** | $0.00 \pm 0.00$ | **$0.56 \pm 0.00$** |
+
+### PPO Hardening Before vs After Delta
+
+| Metric | Original PPO Baseline | Hardened PPO | Absolute Gain | Relative Improvement |
+| :--- | :---: | :---: | :---: | :---: |
+| **Interception Rate** | $6.93\%$ | **$37.87\%$** | $+30.94\%$ | **$+446.6\%$** |
+| **Unique Opportunities** | $134.00$ | **$732.40$** | $+598.40$ | **$+446.6\%$** |
+| **Dwell Efficiency** | $20.10\%$ | **$33.26\%$** | $+13.16\%$ | **$+65.5\%$** |
+| **Total TP Detections** | $1,807.90$ | **$2,992.50$** | $+1,184.60$ | **$+65.5\%$** |
+| **Max Consecutive Scans** | $5000.00$ | **$3.00$** | $-4997.00$ | **$-99.94\%$** |
+| **Shannon Entropy** | $0.00\,\text{nats}$ | **$0.56\,\text{nats}$** | $+0.56\,\text{nats}$ | **$+\infty\%$** |
+
+### Pre-Phase 6A Visual Artifacts
+
+#### 1. Five-Way Head-to-Head Benchmark Comparison
+![5-Way Benchmark](pre_phase6a_5way_benchmark_comparison.png)
+
+#### 2. Five-Way Scan Trajectory & Raster Plot Comparison
+![5-Way Trajectories](pre_phase6a_5way_trajectory_comparison.png)
+
+#### 3. PPO Hardening Before vs After Delta
+![Before After Hardening](pre_phase6a_before_after_hardening.png)
+
+#### 4. Dynamic Frequency-Hopping Adaptation Latency
+![5-Way Hopping Adaptation](pre_phase6a_frequency_hopping_adaptation.png)
+
+---
+
+## 13. Phase 6: Isolated Hybrid Adaptive RF Scheduler
+
+Phase 6 implements the **Hybrid Adaptive RF Scheduler**, which unifies:
+1. **XGBoost (Phase 3):** High-confidence signal presence exploitation.
+2. **Hardened LinUCB (Phase 4):** Principled uncertainty exploration ($U(b) = \alpha \sqrt{x^\top A^{-1} x}$) and non-stationary agility ($\gamma = 0.99$).
+3. **Hardened PPO (Pre-Phase 6A):** Learned multi-threat tracking with anti-camping action masking.
+
+### Six-Way Head-to-Head Benchmark Comparison ($N = 10$ Unseen Test Seeds `0..9`)
+
+| Metric | Open-Loop Baseline | XGBoost Adaptive | Hardened LinUCB | Original PPO | Hardened PPO | Phase 6 Hybrid |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Interception Rate** | $46.13\% \pm 0.68\%$ | $47.28\% \pm 1.09\%$ | $29.75\% \pm 0.51\%$ | $6.93\% \pm 0.00\%$ | $37.87\% \pm 0.04\%$ | **$52.27\% \pm 0.84\%$** |
+| **Unique Opps Intercepted** | $892.2 \pm 13.2$ | $914.4 \pm 21.1$ | $575.4 \pm 9.8$ | $134.0 \pm 0.0$ | $732.4 \pm 0.8$ | **$1,010.9 \pm 16.3$** |
+| **Average Intercept Delay** | $8.25 \pm 0.96$ slots | $2.74 \pm 0.31$ slots | $7.63 \pm 0.25$ slots | $0.10 \pm 0.02$ slots | $0.41 \pm 0.18$ slots | **$6.06 \pm 0.18$ slots** |
+| **PRD Scenario TTFD** | $3.00 \pm 0.00$ slots | **$0.30 \pm 0.48$ slots** | $4.00 \pm 2.54$ slots | $0.30 \pm 0.48$ slots | $0.30 \pm 0.48$ slots | **$3.00 \pm 0.00$ slots** |
+| **Receiver Empirical $P_d$** | $0.90 \pm 0.01$ | $0.90 \pm 0.00$ | $0.90 \pm 0.01$ | $0.90 \pm 0.01$ | $0.90 \pm 0.00$ | **$0.90 \pm 0.00$** |
+| **Receiver Empirical $P_{fa}$** | $0.02 \pm 0.00$ | $0.02 \pm 0.00$ | $0.02 \pm 0.00$ | $0.02 \pm 0.00$ | $0.02 \pm 0.00$ | **$0.02 \pm 0.00$** |
+| **Dwell Efficiency** | $10.73\% \pm 0.74\%$ | **$68.26\% \pm 1.37\%$** | $23.90\% \pm 1.15\%$ | $20.10\% \pm 0.00\%$ | $33.26\% \pm 0.48\%$ | **$64.90\% \pm 0.89\%$** |
+| **Total True Positive Detections** | $964.9 \pm 68.7$ | **$6,146.7 \pm 122.7$** | $2,158.0 \pm 104.0$ | $1,807.9 \pm 14.9$ | $2,992.5 \pm 42.4$ | **$5,843.6 \pm 90.9$** |
+| **TP / Intercepted Opp** | $1.08 \pm 0.07$ | $6.72 \pm 0.07$ | $3.75 \pm 0.22$ | $13.49 \pm 0.11$ | $4.09 \pm 0.06$ | **$5.78 \pm 0.12$** |
+| **Unique Bands Scanned** | **$20.0 / 20$** | $8.1 / 20$ | **$20.0 / 20$** | $1.0 / 20$ | $2.0 / 20$ | **$20.0 / 20$** |
+| **Max Consecutive Scans** | **$1.0 \pm 0.0$** | **$3.0 \pm 0.0$** | **$3.0 \pm 0.0$** | $5000.0 \pm 0.0$ | **$3.0 \pm 0.0$** | **$3.0 \pm 0.0$** |
+| **Band-Selection Shannon Entropy** | **$3.00 \pm 0.00$** | $1.64 \pm 0.08$ | **$2.92 \pm 0.01$** | $0.00 \pm 0.00$ | $0.56 \pm 0.00$ | **$2.32 \pm 0.02$** |
+
+### Dynamic Frequency-Hopping Adaptation Experiment
+
+| Scenario Event | Open-Loop | XGBoost Adaptive | Hardened LinUCB | Original PPO | Hardened PPO | Phase 6 Hybrid |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Hop 1:** $t=1000 \to \text{Band 14}$ | $14\,\text{slots}$ | $114\,\text{slots}$ | $67\,\text{slots}$ | $>1000\,\text{s}$ | $>1000\,\text{s}$ | **$27\,\text{slots}$** |
+| **Hop 2:** $t=2000 \to \text{Band 7}$ | $7\,\text{slots}$ | $36\,\text{slots}$ | $40\,\text{slots}$ | $>1000\,\text{s}$ | $>1000\,\text{s}$ | **$16\,\text{slots}$** |
+| **Hop 3:** $t=3000 \to \text{Band 18}$ | $38\,\text{slots}$ | $248\,\text{slots}$ | $32\,\text{slots}$ | $>1000\,\text{s}$ | $>1000\,\text{s}$ | **$19\,\text{slots}$** |
+
+### Phase 6 Visual Artifacts
+
+#### 1. Six-Way Head-to-Head Benchmark Comparison
+![6-Way Benchmark](phase6_sixway_comparison.png)
+
+#### 2. Six-Way Scan Trajectory & Raster Plot Comparison
+![6-Way Trajectories](phase6_hybrid_trajectory_comparison.png)
+
+#### 3. Dynamic Frequency-Hopping Adaptation Latency
+![6-Way Hopping Adaptation](phase6_hybrid_frequency_hopping.png)
+
+#### 4. Hybrid Exploration vs Exploitation Mode Progression
+![Exploration vs Exploitation](phase6_hybrid_exploration_exploitation.png)
+
+#### 5. Dynamic Arbitration Weights Diagnostics
+![Arbitration Diagnostics](phase6_hybrid_arbitration_diagnostics.png)
+
+---
+
+## 14. Reproduction & Running Experiments
+
+### Run All 103 Unit & Integration Tests
 ```bash
 pytest
 ```
 
-### Run Full Phase 5 PPO Training & 4-Way Benchmark Pipeline
+### Run Phase 6 Hybrid Scheduler Benchmark Pipeline
+```bash
+python experiments/run_hybrid.py
+```
+
+### Run Pre-Phase 6A PPO Training & 5-Way Benchmark Pipeline
 ```bash
 python experiments/run_ppo.py
 ```
@@ -476,3 +583,5 @@ python experiments/run_linucb.py
 ```bash
 python experiments/run_xgboost_benchmark.py
 ```
+
+
